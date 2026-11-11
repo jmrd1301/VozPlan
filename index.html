@@ -109,7 +109,7 @@
 // ---------- Constantes e estado ----------
 const LS_KEY = 'GEMINI_API_KEY';
 const LS_URL = 'GOOGLE_SCRIPT_URL';
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -326,8 +326,7 @@ Regras para data e horário:
         },
         required: ['data', 'horario', 'ocorrido', 'categoria', 'transcricao']
       },
-      temperature: 0.2,
-      thinkingConfig: { thinkingBudget: 0 } // respostas mais rápidas
+      thinkingConfig: { thinkingLevel: 'low' } // respostas mais rápidas (Gemini 3.x usa níveis, não "budget")
     }
   };
 
