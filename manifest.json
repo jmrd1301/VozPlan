@@ -1,0 +1,20 @@
+{
+  "name": "VozPlan",
+  "short_name": "VozPlan",
+  "description": "Assistente de voz que registra ocorrências na sua planilha do Google Sheets.",
+  "lang": "pt-BR",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EDF0F3",
+  "theme_color": "#17243B",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

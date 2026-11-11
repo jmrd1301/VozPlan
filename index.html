@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>VozPlan</title>
+  <meta name="theme-color" content="#17243B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="VozPlan">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    :root { --ink:#17243B; --paper:#EDF0F3; --signal:#E03A2F; --muted:#5B6779; --line:#D5DAE1; }
+    html, body { font-family:'Schibsted Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif; background:var(--paper); color:var(--ink); }
+    body { padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+    button:focus-visible, input:focus-visible, summary:focus-visible { outline:3px solid #3B6FD8; outline-offset:2px; }
+
+    /* Botão de gravação: pulsa em vermelho enquanto grava */
+    .rec-btn { transition: background-color .2s, transform .1s; }
+    .rec-btn:active { transform: scale(.96); }
+    .rec-btn.recording { background:var(--signal); animation:pulse 1.4s ease-out infinite; }
+    @keyframes pulse {
+      0%   { box-shadow:0 0 0 0 rgba(224,58,47,.55); }
+      100% { box-shadow:0 0 0 34px rgba(224,58,47,0); }
+    }
+    .spinner { width:22px; height:22px; border:3px solid var(--line); border-top-color:var(--ink); border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .rec-btn.recording, .spinner { animation:none; }
+    }
+    dialog::backdrop { background:rgba(23,36,59,.55); }
+  </style>
+</head>
+
+<body class="min-h-screen">
+  <div class="mx-auto max-w-md px-5 pb-16">
+
+    <!-- Cabeçalho -->
+    <header class="flex items-center justify-between py-5">
+      <h1 class="text-2xl font-bold tracking-tight">VozPlan</h1>
+      <button id="btnSettings" class="p-2 rounded-full hover:bg-white" aria-label="Abrir configurações">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Área de gravação -->
+    <section class="flex flex-col items-center text-center pt-6 pb-8">
+      <button id="btnRec" class="rec-btn w-36 h-36 rounded-full flex items-center justify-center text-white shadow-lg" style="background:var(--ink)" aria-label="Iniciar gravação">
+        <svg id="iconMic" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/>
+        </svg>
+        <svg id="iconStop" class="hidden" width="48" height="48" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" rx="2"/>
+        </svg>
+      </button>
+
+      <p id="status" class="mt-6 text-lg font-medium" aria-live="polite">Toque para relatar uma ocorrência</p>
+      <p id="timer" class="mt-1 text-sm tabular-nums" style="color:var(--muted)"></p>
+
+      <!-- Mensagens de erro / sucesso -->
+      <div id="alertBox" class="hidden mt-5 w-full rounded-xl px-4 py-3 text-left text-sm" role="alert"></div>
+      <button id="btnRetry" class="hidden mt-3 rounded-full px-5 py-2 text-sm font-medium text-white" style="background:var(--ink)">Tentar salvar de novo</button>
+    </section>
+
+    <!-- Lista de registros -->
+    <section aria-labelledby="listTitle">
+      <div class="flex items-center justify-between mb-3">
+        <h2 id="listTitle" class="text-lg font-bold">Últimos registros</h2>
+        <button id="btnRefresh" class="text-sm font-medium underline underline-offset-4">Atualizar</button>
+      </div>
+      <div id="list" class="space-y-3"></div>
+    </section>
+  </div>
+
+  <!-- Configurações -->
+  <dialog id="dlgSettings" class="w-[92%] max-w-md rounded-2xl p-0 border-0 shadow-2xl">
+    <div class="p-6" style="background:#fff;color:var(--ink)">
+      <h2 class="text-xl font-bold mb-1">Configurações</h2>
+      <p class="text-sm mb-5" style="color:var(--muted)">Os dados ficam salvos só neste aparelho.</p>
+
+      <label class="block text-sm font-medium mb-1" for="inKey">Chave da API do Gemini</label>
+      <input id="inKey" type="password" autocomplete="off" class="w-full rounded-lg border px-3 py-2.5 mb-4" style="border-color:var(--line)" placeholder="Cole a chave do Google AI Studio">
+
+      <label class="block text-sm font-medium mb-1" for="inUrl">URL do Web App (Apps Script)</label>
+      <input id="inUrl" type="url" autocomplete="off" class="w-full rounded-lg border px-3 py-2.5 mb-6" style="border-color:var(--line)" placeholder="https://script.google.com/macros/s/.../exec">
+
+      <div class="flex gap-3 justify-end">
+        <button id="btnCancel" class="px-4 py-2.5 rounded-full text-sm font-medium">Cancelar</button>
+        <button id="btnSave" class="px-5 py-2.5 rounded-full text-sm font-medium text-white" style="background:var(--ink)">Salvar</button>
+      </div>
+    </div>
+  </dialog>
+
+<script>
+/* ============================================================
+   VozPlan — lógica do aplicativo (JavaScript puro)
+   ============================================================ */
+
+// ---------- Constantes e estado ----------
+const LS_KEY = 'GEMINI_API_KEY';
+const LS_URL = 'GOOGLE_SCRIPT_URL';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+
+const $ = (id) => document.getElementById(id);
+const el = {
+  btnRec: $('btnRec'), iconMic: $('iconMic'), iconStop: $('iconStop'),
+  status: $('status'), timer: $('timer'), alertBox: $('alertBox'), btnRetry: $('btnRetry'),
+  list: $('list'), btnRefresh: $('btnRefresh'),
+  dlg: $('dlgSettings'), inKey: $('inKey'), inUrl: $('inUrl'),
+  btnSettings: $('btnSettings'), btnSave: $('btnSave'), btnCancel: $('btnCancel')
+};
+
+let recorder = null;       // instância do MediaRecorder
+let stream = null;         // stream do microfone
+let chunks = [];           // pedaços de áudio gravados
+let startedAt = null;      // Date do início da gravação
+let timerId = null;        // intervalo do cronômetro
+let busy = false;          // true enquanto processa
+let pendingRecord = null;  // registro que falhou ao salvar (para tentar de novo)
+
+const getKey = () => (localStorage.getItem(LS_KEY) || '').trim();
+const getUrl = () => (localStorage.getItem(LS_URL) || '').trim();
+
+// ---------- Utilitários de interface ----------
+function esc(s) { // evita injeção de HTML ao exibir texto da planilha
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function showAlert(msg, type = 'error') {
+  el.alertBox.textContent = msg;
+  el.alertBox.className = 'mt-5 w-full rounded-xl px-4 py-3 text-left text-sm ' +
+    (type === 'error' ? 'bg-red-50 text-red-900 border border-red-200' : 'bg-emerald-50 text-emerald-900 border border-emerald-200');
+}
+function clearAlert() { el.alertBox.className = 'hidden'; el.btnRetry.classList.add('hidden'); }
+
+function setUI(mode) { // 'idle' | 'recording' | 'processing'
+  const rec = mode === 'recording', proc = mode === 'processing';
+  el.btnRec.classList.toggle('recording', rec);
+  el.btnRec.disabled = proc;
+  el.btnRec.setAttribute('aria-label', rec ? 'Parar gravação' : 'Iniciar gravação');
+  el.iconMic.classList.toggle('hidden', rec || proc);
+  el.iconStop.classList.toggle('hidden', !rec);
+
+  if (proc) {
+    el.btnRec.innerHTML = '<div class="spinner" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></div>';
+    el.status.textContent = 'Processando relato...';
+  } else {
+    el.status.textContent = rec ? 'Gravando… toque para parar' : 'Toque para relatar uma ocorrência';
+  }
+}
+
+// Restaura os ícones do botão após o spinner (recria o conteúdo original)
+const BTN_HTML = el.btnRec.innerHTML;
+function restoreButton() {
+  el.btnRec.innerHTML = BTN_HTML;
+  el.iconMic = $('iconMic'); el.iconStop = $('iconStop');
+}
+
+function startTimer() {
+  const t0 = Date.now();
+  el.timer.textContent = '00:00';
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    el.timer.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  }, 500);
+}
+function stopTimer() { clearInterval(timerId); el.timer.textContent = ''; }
+
+// ---------- Configurações ----------
+function openSettings() {
+  el.inKey.value = getKey();
+  el.inUrl.value = getUrl();
+  el.dlg.showModal();
+}
+el.btnSettings.addEventListener('click', openSettings);
+el.btnCancel.addEventListener('click', () => el.dlg.close());
+el.btnSave.addEventListener('click', () => {
+  localStorage.setItem(LS_KEY, el.inKey.value.trim());
+  localStorage.setItem(LS_URL, el.inUrl.value.trim());
+  el.dlg.close();
+  clearAlert();
+  loadList();
+});
+
+function ensureConfig() {
+  if (!getKey() || !getUrl()) {
+    showAlert('Faltam configurações. Toque na engrenagem e informe a chave do Gemini e a URL do Web App.');
+    openSettings();
+    return false;
+  }
+  return true;
+}
+
+// ---------- Gravação de áudio ----------
+// Escolhe um formato suportado: webm (Android/Chrome) ou mp4 (iOS/Safari)
+function pickMimeType() {
+  const options = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg;codecs=opus'];
+  return options.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+}
+
+async function startRecording() {
+  clearAlert();
+  if (!ensureConfig()) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    showAlert('Este navegador não suporta gravação de áudio. Use o Chrome (Android) ou o Safari (iOS 14.3 ou superior).');
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    showAlert(denied
+      ? 'Permissão do microfone negada. Libere o microfone nas configurações do navegador e tente de novo. O app precisa abrir por HTTPS.'
+      : 'Não foi possível acessar o microfone: ' + (err.message || err.name));
+    return;
+  }
+
+  chunks = [];
+  const mime = pickMimeType();
+  recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = handleRecordingStopped;
+
+  startedAt = new Date(); // data/hora exatas do momento da gravação
+  recorder.start();
+  setUI('recording');
+  startTimer();
+}
+
+function stopRecording() {
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  stopTimer();
+}
+
+el.btnRec.addEventListener('click', () => {
+  if (busy) return;
+  if (recorder && recorder.state === 'recording') stopRecording();
+  else startRecording();
+});
+
+// ---------- Fluxo principal: áudio → Gemini → planilha ----------
+async function handleRecordingStopped() {
+  stream.getTracks().forEach((t) => t.stop()); // libera o microfone
+  const type = (recorder.mimeType || chunks[0]?.type || 'audio/webm');
+  const blob = new Blob(chunks, { type });
+
+  if (blob.size < 1000) {
+    restoreButton(); setUI('idle');
+    showAlert('A gravação ficou vazia ou muito curta. Tente novamente.');
+    return;
+  }
+
+  busy = true;
+  setUI('processing');
+  try {
+    const base64 = await blobToBase64(blob);
+    const record = await extractWithGemini(base64, type.split(';')[0], startedAt);
+    pendingRecord = record;
+    await saveRecord(record);
+    pendingRecord = null;
+    showAlert('Registro salvo na planilha.', 'ok');
+  } catch (err) {
+    console.error(err);
+    showAlert(err.message || 'Algo deu errado. Tente novamente.');
+    if (pendingRecord) el.btnRetry.classList.remove('hidden'); // áudio já foi interpretado; só falta salvar
+  } finally {
+    busy = false;
+    restoreButton();
+    setUI('idle');
+    loadList();
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(new Error('Não foi possível ler o áudio gravado.'));
+    r.readAsDataURL(blob);
+  });
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+const fmtDate = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+async function extractWithGemini(base64, mimeType, when) {
+  const weekday = when.toLocaleDateString('pt-BR', { weekday: 'long' });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const prompt = `Você é um assistente que registra ocorrências a partir de áudios em português do Brasil.
+Data e hora atuais do aparelho: ${fmtDate(when)} (${weekday}) às ${fmtTime(when)}, fuso ${tz}.
+
+Ouça o áudio e responda SOMENTE com um JSON com estes campos:
+- "data": formato DD/MM/AAAA
+- "horario": formato HH:MM (24h)
+- "ocorrido": resumo claro, objetivo e gramaticalmente correto do evento relatado
+- "categoria": classificação curta (ex.: Manutenção, Operacional, Financeiro, Pessoal, Geral)
+- "transcricao": transcrição literal exata do que foi falado
+
+Regras para data e horário:
+- Se a pessoa citar data ou horário (ex.: "ontem às 15h", "hoje pela manhã", "segunda-feira"), calcule-os a partir da data e hora atuais informadas acima.
+- Se citar só um período vago (ex.: "pela manhã"), use um horário representativo (ex.: 09:00).
+- Se não citar nada, use exatamente a data e a hora atuais.
+- Se o áudio não tiver fala compreensível, use "ocorrido": "Áudio sem conteúdo compreensível" e "categoria": "Geral".`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          data: { type: 'STRING' }, horario: { type: 'STRING' }, ocorrido: { type: 'STRING' },
+          categoria: { type: 'STRING' }, transcricao: { type: 'STRING' }
+        },
+        required: ['data', 'horario', 'ocorrido', 'categoria', 'transcricao']
+      },
+      temperature: 0.2,
+      thinkingConfig: { thinkingBudget: 0 } // respostas mais rápidas
+    }
+  };
+
+  let res;
+  try {
+    res = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getKey() },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    throw new Error('Sem conexão com o Gemini. Verifique sua internet.');
+  }
+
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json()).error?.message || ''; } catch {}
+    if (res.status === 400 && /API key/i.test(detail)) throw new Error('Chave da API do Gemini inválida. Confira em Configurações.');
+    if (res.status === 403) throw new Error('Chave do Gemini sem permissão. Confira a chave em Configurações.');
+    if (res.status === 429) throw new Error('Limite de uso do Gemini atingido. Aguarde um instante e tente de novo.');
+    throw new Error(`O Gemini não conseguiu processar o áudio (erro ${res.status}). ${detail}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+  try {
+    const clean = text.replace(/```json|```/g, '').trim(); // por segurança, remove cercas de código
+    return JSON.parse(clean);
+  } catch {
+    throw new Error('A resposta do Gemini veio em formato inesperado. Tente gravar de novo.');
+  }
+}
+
+// ---------- Planilha (Google Apps Script) ----------
+async function saveRecord(record) {
+  let res;
+  try {
+    // "text/plain" evita o preflight CORS, que o Apps Script não suporta
+    res = await fetch(getUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(record)
+    });
+  } catch {
+    throw new Error('Não foi possível falar com a planilha. Confira a URL do Web App e sua internet. O relato foi interpretado; use "Tentar salvar de novo".');
+  }
+  const out = await res.json().catch(() => null);
+  if (!out || !out.ok) {
+    throw new Error('A planilha recusou o registro' + (out?.error ? `: ${out.error}` : '. Confira se o Web App está publicado para "Qualquer pessoa".') + ' Use "Tentar salvar de novo".');
+  }
+}
+
+el.btnRetry.addEventListener('click', async () => {
+  if (!pendingRecord || busy) return;
+  busy = true; clearAlert();
+  try {
+    await saveRecord(pendingRecord);
+    pendingRecord = null;
+    showAlert('Registro salvo na planilha.', 'ok');
+    loadList();
+  } catch (err) {
+    showAlert(err.message);
+    el.btnRetry.classList.remove('hidden');
+  } finally { busy = false; }
+});
+
+async function loadList() {
+  const url = getUrl();
+  if (!url) {
+    el.list.innerHTML = '<p class="text-sm" style="color:var(--muted)">Configure a URL do Web App (engrenagem) para ver seus registros.</p>';
+    return;
+  }
+  el.list.innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
+  try {
+    const res = await fetch(url + (url.includes('?') ? '&' : '?') + 't=' + Date.now());
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || 'Erro ao ler a planilha.');
+    renderList(out.registros || []);
+  } catch (err) {
+    el.list.innerHTML = '<p class="text-sm text-red-800">Não foi possível carregar os registros. Confira a URL e a publicação do Web App.</p>';
+  }
+}
+
+function renderList(items) {
+  if (!items.length) {
+    el.list.innerHTML = '<p class="text-sm" style="color:var(--muted)">Nenhum registro ainda. Grave o primeiro relato.</p>';
+    return;
+  }
+  el.list.innerHTML = items.map((r) => `
+    <article class="rounded-2xl bg-white p-4 border" style="border-color:var(--line)">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <span class="text-sm tabular-nums" style="color:var(--muted)">${esc(r.data)} às ${esc(r.horario)}</span>
+        <span class="rounded-full px-3 py-0.5 text-xs font-medium" style="background:#E3E9F2">${esc(r.categoria)}</span>
+      </div>
+      <p class="leading-snug">${esc(r.ocorrido)}</p>
+      ${r.transcricao ? `<details class="mt-3 text-sm" style="color:var(--muted)">
+        <summary class="cursor-pointer">Ver transcrição original</summary>
+        <p class="mt-2 leading-snug">${esc(r.transcricao)}</p>
+      </details>` : ''}
+    </article>`).join('');
+}
+el.btnRefresh.addEventListener('click', loadList);
+
+// ---------- Início ----------
+if (!getKey() || !getUrl()) showAlert('Bem-vindo! Toque na engrenagem para informar a chave do Gemini e a URL do Web App.', 'ok');
+loadList();
+</script>
+</body>
+</html>
