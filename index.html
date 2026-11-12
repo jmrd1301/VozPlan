@@ -69,7 +69,7 @@
 
       <!-- Mensagens de erro / sucesso -->
       <div id="alertBox" class="hidden mt-5 w-full rounded-xl px-4 py-3 text-left text-sm" role="alert"></div>
-      <button id="btnRetry" class="hidden mt-3 rounded-full px-5 py-2 text-sm font-medium text-white" style="background:var(--ink)">Tentar salvar de novo</button>
+      <button id="btnRetry" class="hidden mt-3 rounded-full px-5 py-2 text-sm font-medium text-white" style="background:var(--ink)">Tentar de novo</button>
     </section>
 
     <!-- Lista de registros -->
@@ -109,7 +109,8 @@
 // ---------- Constantes e estado ----------
 const LS_KEY = 'GEMINI_API_KEY';
 const LS_URL = 'GOOGLE_SCRIPT_URL';
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash']; // o segundo é reserva se o primeiro estiver sobrecarregado
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -127,6 +128,7 @@ let startedAt = null;      // Date do início da gravação
 let timerId = null;        // intervalo do cronômetro
 let busy = false;          // true enquanto processa
 let pendingRecord = null;  // registro que falhou ao salvar (para tentar de novo)
+let pendingAudio = null;   // áudio que o Gemini não conseguiu processar (para tentar de novo sem regravar)
 
 const getKey = () => (localStorage.getItem(LS_KEY) || '').trim();
 const getUrl = () => (localStorage.getItem(LS_URL) || '').trim();
@@ -264,15 +266,17 @@ async function handleRecordingStopped() {
   setUI('processing');
   try {
     const base64 = await blobToBase64(blob);
-    const record = await extractWithGemini(base64, type.split(';')[0], startedAt);
+    pendingAudio = { base64, mime: type.split(';')[0], when: startedAt };
+    const record = await extractWithGemini(pendingAudio.base64, pendingAudio.mime, pendingAudio.when);
     pendingRecord = record;
     await saveRecord(record);
     pendingRecord = null;
+    pendingAudio = null;
     showAlert('Registro salvo na planilha.', 'ok');
   } catch (err) {
     console.error(err);
     showAlert(err.message || 'Algo deu errado. Tente novamente.');
-    if (pendingRecord) el.btnRetry.classList.remove('hidden'); // áudio já foi interpretado; só falta salvar
+    if (pendingRecord || pendingAudio) el.btnRetry.classList.remove('hidden'); // dá para tentar de novo sem regravar
   } finally {
     busy = false;
     restoreButton();
@@ -293,6 +297,32 @@ function blobToBase64(blob) {
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Chama o Gemini com novas tentativas (picos de demanda, erros 429/5xx) e modelo reserva
+async function fetchGemini(body) {
+  let res;
+  for (const model of GEMINI_MODELS) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        res = await fetch(GEMINI_BASE + model + ':generateContent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getKey() },
+          body: JSON.stringify(body)
+        });
+      } catch {
+        throw new Error('Sem conexão com o Gemini. Verifique sua internet.');
+      }
+      if (res.ok) return res;
+      if (res.status === 404) break; // modelo indisponível: passa para o reserva
+      if (![429, 500, 503, 504].includes(res.status)) return res; // erro que não adianta repetir
+      el.status.textContent = 'Gemini ocupado, tentando de novo...';
+      await sleep(1500 * (attempt + 1));
+    }
+  }
+  return res;
+}
 
 async function extractWithGemini(base64, mimeType, when) {
   const weekday = when.toLocaleDateString('pt-BR', { weekday: 'long' });
@@ -330,16 +360,7 @@ Regras para data e horário:
     }
   };
 
-  let res;
-  try {
-    res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getKey() },
-      body: JSON.stringify(body)
-    });
-  } catch {
-    throw new Error('Sem conexão com o Gemini. Verifique sua internet.');
-  }
+  const res = await fetchGemini(body);
 
   if (!res.ok) {
     let detail = '';
@@ -371,26 +392,34 @@ async function saveRecord(record) {
       body: JSON.stringify(record)
     });
   } catch {
-    throw new Error('Não foi possível falar com a planilha. Confira a URL do Web App e sua internet. O relato foi interpretado; use "Tentar salvar de novo".');
+    throw new Error('Não foi possível falar com a planilha. Confira a URL do Web App e sua internet. O relato foi interpretado; use "Tentar de novo".');
   }
   const out = await res.json().catch(() => null);
   if (!out || !out.ok) {
-    throw new Error('A planilha recusou o registro' + (out?.error ? `: ${out.error}` : '. Confira se o Web App está publicado para "Qualquer pessoa".') + ' Use "Tentar salvar de novo".');
+    throw new Error('A planilha recusou o registro' + (out?.error ? `: ${out.error}` : '. Confira se o Web App está publicado para "Qualquer pessoa".') + ' Use "Tentar de novo".');
   }
 }
 
 el.btnRetry.addEventListener('click', async () => {
-  if (!pendingRecord || busy) return;
+  if ((!pendingRecord && !pendingAudio) || busy) return;
   busy = true; clearAlert();
+  setUI('processing');
   try {
+    if (!pendingRecord) { // o Gemini ainda não tinha processado o áudio
+      pendingRecord = await extractWithGemini(pendingAudio.base64, pendingAudio.mime, pendingAudio.when);
+    }
     await saveRecord(pendingRecord);
-    pendingRecord = null;
+    pendingRecord = null; pendingAudio = null;
     showAlert('Registro salvo na planilha.', 'ok');
-    loadList();
   } catch (err) {
     showAlert(err.message);
     el.btnRetry.classList.remove('hidden');
-  } finally { busy = false; }
+  } finally {
+    busy = false;
+    restoreButton();
+    setUI('idle');
+    loadList();
+  }
 });
 
 async function loadList() {
