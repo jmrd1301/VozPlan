@@ -110,7 +110,8 @@
 const LS_KEY = 'GEMINI_API_KEY';
 const LS_URL = 'GOOGLE_SCRIPT_URL';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash']; // o segundo é reserva se o primeiro estiver sobrecarregado
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']; // se um estiver sobrecarregado, passa direto para o próximo
+const REQUEST_TIMEOUT_MS = 25000; // tempo máximo de espera por tentativa
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -303,27 +304,35 @@ const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Chama o Gemini com novas tentativas (picos de demanda, erros 429/5xx) e modelo reserva
+// Chama o Gemini. Se um modelo estiver ocupado, lento ou indisponível, passa na hora para o próximo
+// (sem ficar esperando). Se todos falharem, espera um pouco e faz mais uma rodada.
 async function fetchGemini(body) {
-  let res;
-  for (const model of GEMINI_MODELS) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+  let res = null;
+  for (let round = 0; round < 2; round++) {
+    for (const model of GEMINI_MODELS) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
       try {
         res = await fetch(GEMINI_BASE + model + ':generateContent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getKey() },
-          body: JSON.stringify(body)
+          body: JSON.stringify(body),
+          signal: ctrl.signal
         });
-      } catch {
-        throw new Error('Sem conexão com o Gemini. Verifique sua internet.');
-      }
+      } catch (err) {
+        res = null;
+        if (err.name !== 'AbortError') throw new Error('Sem conexão com o Gemini. Verifique sua internet.');
+        el.status.textContent = 'Demorou demais, tentando outro modelo...';
+        continue; // estourou o tempo: próximo modelo
+      } finally { clearTimeout(timer); }
+
       if (res.ok) return res;
-      if (res.status === 404) break; // modelo indisponível: passa para o reserva
-      if (![429, 500, 503, 504].includes(res.status)) return res; // erro que não adianta repetir
-      el.status.textContent = 'Gemini ocupado, tentando de novo...';
-      await sleep(1500 * (attempt + 1));
+      if (![404, 429, 500, 503, 504].includes(res.status)) return res; // erro que não adianta repetir (ex.: chave inválida)
+      el.status.textContent = 'Gemini ocupado, tentando outro modelo...';
     }
+    if (round === 0) await sleep(2500);
   }
+  if (!res) throw new Error('O Gemini demorou demais para responder. Use "Tentar de novo".');
   return res;
 }
 
