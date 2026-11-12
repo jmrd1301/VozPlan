@@ -221,9 +221,12 @@ async function startRecording() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
     const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    const busyMic = err && (err.name === 'NotReadableError' || /audio source/i.test(err.message || ''));
     showAlert(denied
-      ? 'Permissão do microfone negada. Libere o microfone nas configurações do navegador e tente de novo. O app precisa abrir por HTTPS.'
-      : 'Não foi possível acessar o microfone: ' + (err.message || err.name));
+      ? 'Permissão do microfone negada. Libere o microfone nas configurações do navegador ou do app e tente de novo. O app precisa abrir por HTTPS.'
+      : busyMic
+        ? 'O Android não liberou o microfone. Em Configurações > Apps > VozPlan > Permissões, permita o Microfone. Se já estiver permitido, feche outros apps que usem o microfone (chamadas, WhatsApp, fone Bluetooth) e tente de novo.'
+        : 'Não foi possível acessar o microfone: ' + (err.message || err.name));
     return;
   }
 
